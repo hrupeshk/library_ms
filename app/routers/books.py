@@ -34,6 +34,7 @@ async def list_books(
     title: Optional[str] = None,
     author: Optional[str] = None,
     category: Optional[str] = None,
+    isbn: Optional[str] = None,
     page: int = Query(1, gt=0),
     limit: int = Query(10, gt=0, le=100),
     db: AsyncSession = Depends(get_db)
@@ -47,6 +48,8 @@ async def list_books(
         query = query.where(Book.author.ilike(f"%{author}%"))
     if category:
         query = query.where(Book.category.ilike(f"%{category}%"))
+    if isbn:
+        query = query.where(Book.isbn.ilike(f"%{isbn}%"))
     
     # Apply pagination
     query = query.offset((page - 1) * limit).limit(limit)

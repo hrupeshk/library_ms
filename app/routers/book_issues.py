@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
+from sqlalchemy.orm import selectinload
 from typing import List
 from datetime import datetime, timedelta
 from ..database import get_db
@@ -97,10 +98,87 @@ async def get_student_issues(student_id: int, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="Student not found")
     
     # Get all issues for student
-    result = await db.execute(
+    query = (
         select(BookIssue)
+        .options(selectinload(BookIssue.book), selectinload(BookIssue.student))
         .where(BookIssue.student_id == student_id)
         .order_by(BookIssue.created_at.desc())
     )
+    result = await db.execute(query)
+    issues = result.scalars().all()
+    return issues
+
+@router.get("/active", response_model=List[BookIssueResponse])
+async def list_active_issues(
+    page: int = Query(1, gt=0),
+    limit: int = Query(10, gt=0, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all currently active book issues with pagination."""
+    query = (
+        select(BookIssue)
+        .options(selectinload(BookIssue.book), selectinload(BookIssue.student))
+        .where(BookIssue.status == IssueStatus.ISSUED)
+        .order_by(BookIssue.return_date.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )
+    
+    result = await db.execute(query)
+    issues = result.scalars().all()
+    return issues
+
+@router.get("/overdue", response_model=List[BookIssueResponse])
+async def list_overdue_issues(
+    page: int = Query(1, gt=0),
+    limit: int = Query(10, gt=0, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all overdue book issues with pagination."""
+    current_date = datetime.now()
+    query = (
+        select(BookIssue)
+        .options(selectinload(BookIssue.book), selectinload(BookIssue.student))
+        .where(
+            and_(
+                BookIssue.status == IssueStatus.ISSUED,
+                BookIssue.return_date < current_date
+            )
+        )
+        .order_by(BookIssue.return_date.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )
+    
+    result = await db.execute(query)
+    issues = result.scalars().all()
+    return issues
+
+@router.get("/student/{student_id}/overdue", response_model=List[BookIssueResponse])
+async def get_student_overdue_issues(
+    student_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all overdue books for a specific student."""
+    # Check if student exists
+    result = await db.execute(select(Student).where(Student.id == student_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    current_date = datetime.now()
+    query = (
+        select(BookIssue)
+        .options(selectinload(BookIssue.book), selectinload(BookIssue.student))
+        .where(
+            and_(
+                BookIssue.student_id == student_id,
+                BookIssue.status == IssueStatus.ISSUED,
+                BookIssue.return_date < current_date
+            )
+        )
+        .order_by(BookIssue.return_date.asc())
+    )
+    
+    result = await db.execute(query)
     issues = result.scalars().all()
     return issues 
